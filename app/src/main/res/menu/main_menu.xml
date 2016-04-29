@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item android:id="@+id/menuMainConnect"
+        android:title="@string/menu_item_name_connect"
+        app:showAsAction="ifRoom"
+        android:icon="@drawable/ic_sync_white_24dp"/>
+
+    <item android:id="@+id/menuMainOpenSchedule"
+        android:title="@string/menu_item_name_schedule"
+        app:showAsAction="ifRoom"
+        android:icon="@drawable/ic_event_note_white_24dp"/>
+</menu>
