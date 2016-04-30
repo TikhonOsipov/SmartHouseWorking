@@ -9,38 +9,60 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.support.v7.app.AppCompatActivity;
+import android.support.v7.widget.LinearLayoutManager;
+import android.support.v7.widget.RecyclerView;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.Button;
 
+import com.tixon.smarthouseworking.database.HelperFactory;
+import com.tixon.smarthouseworking.model.ArduinoHistory;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Method;
+import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.Calendar;
 
 public class MainActivity extends AppCompatActivity {
 
-    Button bConnect, bOpen, bClose;
+    Button bOpen, bClose;
     Button bSetTime, bGetTime;
+    RecyclerView recyclerViewHistory;
+    HistoryAdapter adapter;
     String macAddress = "98:D3:32:30:45:A6";
     BluetoothSocket socket;
     Handler handler;
     StringBuilder sb = new StringBuilder();
+
+    private ArrayList<ArduinoHistory> history = new ArrayList<>();
+
+    private static final int REQUEST_CODE_BLUETOOTH = 0;
+    private static final int REQUEST_CODE_SCHEDULE = 1;
+
+    private boolean connected = false;
+    ConnectionTask connectionTask = new ConnectionTask();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        bConnect = (Button) findViewById(R.id.buttonConnect);
+        //bConnect = (Button) findViewById(R.id.buttonConnect);
         bOpen = (Button) findViewById(R.id.buttonOpen);
         bClose = (Button) findViewById(R.id.buttonClose);
 
         bSetTime = (Button) findViewById(R.id.buttonSetTime);
         bGetTime = (Button) findViewById(R.id.buttonGetTime);
+
+        recyclerViewHistory = (RecyclerView) findViewById(R.id.historyRecyclerView);
+        recyclerViewHistory.setLayoutManager(new LinearLayoutManager(MainActivity.this));
+        adapter = new HistoryAdapter(history);
+        recyclerViewHistory.setAdapter(adapter);
 
         handler = new Handler() {
             @Override
@@ -57,6 +79,8 @@ public class MainActivity extends AppCompatActivity {
                             sb.delete(0, sb.length());
                             //view.showCurtainState(sbPrint);
                             Log.d("myLogs", "message from Arduino: " + sbPrint);
+                            history.add(0, new ArduinoHistory(sbPrint, System.currentTimeMillis()));
+                            adapter.notifyDataSetChanged();
                         }
                         break;
 
@@ -65,28 +89,14 @@ public class MainActivity extends AppCompatActivity {
             }
         };
 
-
-        bConnect.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                ConnectionTask task = new ConnectionTask();
-                task.execute();
-            }
-        });
-
         bOpen.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 //turn light on
                 try {
                     OutputStream outStream = socket.getOutputStream();
-                    //int value = 1;
-                    int value = 5;
+                    int value = 1;
                     outStream.write(value);
-                    //test string; must get from database
-                    String s = "06:00 19:30;06:00 19:00;06:00 19:00;06:00 19:00;06:00 19:00;06:00 19:00;06:00 19:10 \n";
-                    outStream.write(s.getBytes());
-
                     Log.d("myLogs", "turned on / opening");
                 } catch (Exception e) {
                     Log.e("myLogs", "couldn't turn light on: " + e.toString());
@@ -116,7 +126,7 @@ public class MainActivity extends AppCompatActivity {
         bSetTime.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                //Set time
+                //Set time on Arduino clock
                 Calendar c = Calendar.getInstance();
                 c.setTimeInMillis(System.currentTimeMillis());
                 String time = getString(R.string.time_format, c);
@@ -137,7 +147,7 @@ public class MainActivity extends AppCompatActivity {
         bGetTime.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                //Get time
+                //Get info from Arduino - curtain state and
                 try {
                     OutputStream outStream = socket.getOutputStream();
                     int value = 7;
@@ -161,21 +171,57 @@ public class MainActivity extends AppCompatActivity {
     public boolean onOptionsItemSelected(MenuItem item) {
         switch(item.getItemId()) {
             case R.id.menuMainConnect:
+                connectionTask.execute();
                 break;
             case R.id.menuMainOpenSchedule:
-                startActivity(new Intent(MainActivity.this, ScheduleActivity.class));
+                //startActivity(new Intent(MainActivity.this, ScheduleActivity.class));
+                Intent openScheduleIntent = new Intent(MainActivity.this, ScheduleActivity.class);
+                startActivityForResult(openScheduleIntent, REQUEST_CODE_SCHEDULE);
                 break;
         }
         return super.onOptionsItemSelected(item);
     }
 
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        switch(requestCode) {
+            case REQUEST_CODE_SCHEDULE:
+                if(resultCode == RESULT_OK) {
+                    try {
+                        OutputStream outStream = socket.getOutputStream();
+                        int value = 5;
+                        outStream.write(value);
+                        try {
+                            String s = HelperFactory.getHelper().getScheduleDAO().getScheduleStringFormat();
+                            outStream.write(s.getBytes());
+                            Log.d("myLogs", "Schedule string format (debug): " + s);
+                        } catch (SQLException sqlException) {
+                            Log.e("myLogs", "error to get schedule in string format: " + sqlException.toString());
+                            history.add(0, new ArduinoHistory("error: " + sqlException.toString(), System.currentTimeMillis()));
+                            adapter.notifyDataSetChanged();
+                            sqlException.printStackTrace();
+                        }
+                    } catch (IOException e) {
+                        Log.e("myLogs", "error send time for week: " + e.toString());
+                        history.add(0, new ArduinoHistory("error: " + e.toString(), System.currentTimeMillis()));
+                        adapter.notifyDataSetChanged();
+                        e.printStackTrace();
+                    }
+                }
+                break;
+            default: break;
+        }
+    }
+
+    // Tasks
+
     private class ConnectionTask extends AsyncTask<Void, Void, Void> {
-        private boolean connected = false;
         private BluetoothAdapter adapter;
 
         @Override
         protected Void doInBackground(Void... params) {
-            startActivityForResult(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE), 0);
+            startActivityForResult(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE), REQUEST_CODE_BLUETOOTH);
             adapter = BluetoothAdapter.getDefaultAdapter();
             BluetoothDevice device = adapter.getRemoteDevice(macAddress);
             try {
@@ -197,9 +243,11 @@ public class MainActivity extends AppCompatActivity {
             ReadTask readTask = new ReadTask();
             if(connected) {
                 Log.d("myLogs", "Connected");
+                history.add(0, new ArduinoHistory("Connected", System.currentTimeMillis()));
                 readTask.execute();
             } else {
                 Log.d("myLogs", "Disconnected");
+                history.add(0, new ArduinoHistory("Disconnected", System.currentTimeMillis()));
             }
             super.onPostExecute(aVoid);
         }

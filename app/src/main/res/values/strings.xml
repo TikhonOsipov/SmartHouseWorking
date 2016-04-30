@@ -4,4 +4,5 @@
     <string name="menu_item_name_connect">Connect</string>
 
     <string name="time_format">%1$td.%1$tm.%1$ty %1$tH:%1$tM:%1$tS</string>
+    <string name="schedule_save">Save</string>
 </resources>
